@@ -1,0 +1,13 @@
+.password
+node_modules
+cdk.out
+cdk.context.json
+custom-task-definition.json
+nginx-task-definition.json
+quick-test.sh
+test-webhook.sh
+
+# TypeScript build output
+*.js
+*.d.ts
+!aardvark-aap/**/*.js
