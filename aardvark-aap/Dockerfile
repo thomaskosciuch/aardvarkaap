@@ -21,4 +21,4 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD node healthcheck.js
 
 
-CMD ["node", "slack-app.js"]
+CMD ["node", "app.js"]

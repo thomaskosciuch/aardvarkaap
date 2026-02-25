@@ -8,8 +8,11 @@
     "watch": "tsc -w",
     "test": "jest",
     "cdk": "cdk",
-    "deploy": "cdk deploy",
-    "destroy": "cdk destroy"
+    "deploy": "./deploy.sh",
+    "deploy:app": "./scripts/deploy-app.sh",
+    "deploy:infra": "./scripts/deploy-infra.sh",
+    "status": "./scripts/status.sh",
+    "logs": "./scripts/logs.sh"
   },
   "devDependencies": {
     "@types/jest": "^29.5.0",
