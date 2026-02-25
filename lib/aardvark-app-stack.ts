@@ -4,6 +4,7 @@ import * as ecr from 'aws-cdk-lib/aws-ecr';
 import * as ecs from 'aws-cdk-lib/aws-ecs';
 import * as ecsPatterns from 'aws-cdk-lib/aws-ecs-patterns';
 import * as logs from 'aws-cdk-lib/aws-logs';
+import * as rds from 'aws-cdk-lib/aws-rds';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import { Construct } from 'constructs';
 
@@ -47,6 +48,39 @@ export class AardvarkAppStack extends cdk.Stack {
       removalPolicy: cdk.RemovalPolicy.DESTROY,
     });
 
+    // --- RDS MySQL ---
+    const dbSecurityGroup = new ec2.SecurityGroup(this, 'AardvarkDbSecurityGroup', {
+      vpc,
+      description: 'Allow MySQL access from ECS instances',
+      allowAllOutbound: false,
+    });
+
+    dbSecurityGroup.addIngressRule(
+      autoScalingGroup.connections.securityGroups[0],
+      ec2.Port.tcp(3306),
+      'MySQL from ECS'
+    );
+
+    const database = new rds.DatabaseInstance(this, 'AardvarkDatabase', {
+      engine: rds.DatabaseInstanceEngine.mysql({
+        version: rds.MysqlEngineVersion.VER_8_0,
+      }),
+      instanceType: ec2.InstanceType.of(ec2.InstanceClass.T4G, ec2.InstanceSize.MICRO),
+      vpc,
+      vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
+      credentials: rds.Credentials.fromGeneratedSecret('aardvark_admin', {
+        secretName: 'aardvark-app/db',
+      }),
+      databaseName: 'aardvark',
+      storageEncrypted: true,
+      allocatedStorage: 20,
+      maxAllocatedStorage: 50,
+      securityGroups: [dbSecurityGroup],
+      publiclyAccessible: false,
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      deletionProtection: false,
+    });
+
     // Reference existing Slack credentials in Secrets Manager (created via AWS CLI)
     const slackSecret = secretsmanager.Secret.fromSecretNameV2(this, 'AardvarkSlackSecret', 'aardvark-app/slack');
 
@@ -73,6 +107,7 @@ export class AardvarkAppStack extends cdk.Stack {
         SLACK_SIGNING_SECRET: ecs.Secret.fromSecretsManager(slackSecret, 'SLACK_SIGNING_SECRET'),
         SLACK_CLIENT_ID: ecs.Secret.fromSecretsManager(slackSecret, 'SLACK_CLIENT_ID'),
         SLACK_CLIENT_SECRET: ecs.Secret.fromSecretsManager(slackSecret, 'SLACK_CLIENT_SECRET'),
+        DB_SECRET: ecs.Secret.fromSecretsManager(database.secret!),
       },
     });
 
@@ -118,6 +153,11 @@ export class AardvarkAppStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'AardvarkAutoScalingGroupName', {
       value: autoScalingGroup.autoScalingGroupName,
       description: 'Aardvark App Auto Scaling Group Name',
+    });
+
+    new cdk.CfnOutput(this, 'AardvarkDatabaseEndpoint', {
+      value: database.dbInstanceEndpointAddress,
+      description: 'Aardvark App RDS MySQL Endpoint',
     });
   }
 }
