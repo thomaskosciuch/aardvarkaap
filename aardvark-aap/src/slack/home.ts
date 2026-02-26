@@ -138,6 +138,14 @@ function configSection(): KnownBlock[] {
         { type: 'mrkdwn', text: '`channel` is optional — omit it to log without posting to a channel' },
       ],
     },
+    { type: 'divider' },
+    {
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: '*Slash commands:*\n`/db-listusers` — list database users\n`/db-adduser <user> <pass>` — create read-only user (admin)\n`/db-removeuser <user>` — drop user (admin)',
+      },
+    },
   ];
 }
 

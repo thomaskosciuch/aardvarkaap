@@ -3,6 +3,7 @@ import { receiver } from './slack';
 import healthRouter from './routes/health';
 import webhookRouter from './routes/webhook';
 import './slack/events';
+import './slack/commands';
 
 const port = Number(process.env.PORT) || 80;
 
