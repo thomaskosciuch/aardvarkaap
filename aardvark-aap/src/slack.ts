@@ -1,7 +1,7 @@
-const { App, ExpressReceiver } = require('@slack/bolt');
+import { App, ExpressReceiver } from '@slack/bolt';
 
 const receiver = new ExpressReceiver({
-  signingSecret: process.env.SLACK_SIGNING_SECRET,
+  signingSecret: process.env.SLACK_SIGNING_SECRET!,
 });
 
 const slackApp = new App({
@@ -11,4 +11,4 @@ const slackApp = new App({
   clientSecret: process.env.SLACK_CLIENT_SECRET,
 });
 
-module.exports = { slackApp, receiver };
+export { slackApp, receiver };

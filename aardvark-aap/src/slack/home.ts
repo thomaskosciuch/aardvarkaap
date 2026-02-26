@@ -1,13 +1,16 @@
-const store = require('../store');
+import type { WebClient } from '@slack/web-api';
+import type { KnownBlock } from '@slack/types';
+import * as store from '../store';
+import type { WebhookMessage } from '../store';
 
-function buildHomeBlocks() {
+function buildHomeBlocks(): KnownBlock[] {
   const now = new Date();
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const todayMessages = store.messages.filter(m => new Date(m.timestamp) >= todayStart);
 
   const uptimeStr = formatUptime();
 
-  const blocks = [
+  const blocks: KnownBlock[] = [
     ...todaySection(uptimeStr, todayMessages),
     { type: 'divider' },
     ...logSection(),
@@ -18,7 +21,7 @@ function buildHomeBlocks() {
   return blocks;
 }
 
-function formatUptime() {
+function formatUptime(): string {
   const secs = Math.floor((Date.now() - store.startTime) / 1000);
   const days = Math.floor(secs / 86400);
   const hours = Math.floor((secs % 86400) / 3600);
@@ -29,8 +32,8 @@ function formatUptime() {
   return `${minutes}m`;
 }
 
-function todaySection(uptimeStr, todayMessages) {
-  const blocks = [
+function todaySection(uptimeStr: string, todayMessages: WebhookMessage[]): KnownBlock[] {
+  const blocks: KnownBlock[] = [
     {
       type: 'header',
       text: { type: 'plain_text', text: 'Today' },
@@ -45,7 +48,7 @@ function todaySection(uptimeStr, todayMessages) {
   ];
 
   // Sources breakdown
-  const sourceCounts = {};
+  const sourceCounts: Record<string, number> = {};
   for (const msg of todayMessages) {
     sourceCounts[msg.source] = (sourceCounts[msg.source] || 0) + 1;
   }
@@ -64,8 +67,8 @@ function todaySection(uptimeStr, todayMessages) {
   return blocks;
 }
 
-function logSection() {
-  const blocks = [
+function logSection(): KnownBlock[] {
+  const blocks: KnownBlock[] = [
     {
       type: 'header',
       text: { type: 'plain_text', text: 'Log' },
@@ -109,7 +112,7 @@ function logSection() {
   return blocks;
 }
 
-function configSection() {
+function configSection(): KnownBlock[] {
   return [
     {
       type: 'header',
@@ -118,8 +121,8 @@ function configSection() {
     {
       type: 'section',
       fields: [
-        { type: 'mrkdwn', text: `*Webhook endpoint:*\n\`POST /webhook\`` },
-        { type: 'mrkdwn', text: `*Default channel:*\n<#C09DH2G0K0Q>` },
+        { type: 'mrkdwn', text: '*Webhook endpoint:*\n`POST /webhook`' },
+        { type: 'mrkdwn', text: '*Default channel:*\n<#C09DH2G0K0Q>' },
       ],
     },
     {
@@ -138,7 +141,7 @@ function configSection() {
   ];
 }
 
-async function publishHome(client, userId) {
+async function publishHome(client: WebClient, userId: string): Promise<void> {
   await client.views.publish({
     user_id: userId,
     view: {
@@ -149,4 +152,4 @@ async function publishHome(client, userId) {
   });
 }
 
-module.exports = { buildHomeBlocks, publishHome };
+export { buildHomeBlocks, publishHome };

@@ -1,15 +1,14 @@
-const express = require('express');
-const { Router } = require('express');
-const { slackApp } = require('../slack');
-const { publishHome } = require('../slack/home');
-const store = require('../store');
+import express, { Router } from 'express';
+import { slackApp } from '../slack';
+import { publishHome } from '../slack/home';
+import * as store from '../store';
 
 const router = Router();
 
 const DEFAULT_CHANNEL = 'C09DH2G0K0Q';
 
 // Get webhook messages
-router.get('/webhook-messages', (req, res) => {
+router.get('/webhook-messages', (_req, res) => {
   res.json({
     messages: store.messages,
     count: store.messages.length,
@@ -17,7 +16,7 @@ router.get('/webhook-messages', (req, res) => {
 });
 
 // Clear webhook messages
-router.delete('/webhook-messages', (req, res) => {
+router.delete('/webhook-messages', (_req, res) => {
   store.clear();
   res.json({ success: true, message: 'Webhook messages cleared' });
 });
@@ -28,7 +27,8 @@ router.post('/webhook', express.json(), async (req, res) => {
     const { message, source = 'external-app', channel = DEFAULT_CHANNEL } = req.body;
 
     if (!message) {
-      return res.status(400).json({ error: 'Message is required' });
+      res.status(400).json({ error: 'Message is required' });
+      return;
     }
 
     store.add({ message, source });
@@ -60,11 +60,11 @@ router.post('/webhook', express.json(), async (req, res) => {
     // Update App Home for active users
     try {
       const usersResult = await slackApp.client.users.list();
-      const users = usersResult.members.filter(u => !u.deleted && !u.is_bot);
+      const users = (usersResult.members ?? []).filter(u => !u.deleted && !u.is_bot);
 
       for (const user of users.slice(0, 10)) {
         try {
-          await publishHome(slackApp.client, user.id);
+          await publishHome(slackApp.client, user.id!);
         } catch (userError) {
           console.error(`Error updating app home for user ${user.id}:`, userError);
         }
@@ -84,4 +84,4 @@ router.post('/webhook', express.json(), async (req, res) => {
   }
 });
 
-module.exports = router;
+export default router;
