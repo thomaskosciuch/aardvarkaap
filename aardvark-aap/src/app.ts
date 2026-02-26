@@ -1,7 +1,10 @@
 import express from 'express';
 import { receiver } from './slack';
+import { initAdminsTable, seedAdmins } from './db/admins';
+import { initSchema } from './db/schema';
 import healthRouter from './routes/health';
 import webhookRouter from './routes/webhook';
+import dbUsersRouter from './routes/db/users';
 import './slack/events';
 import './slack/commands';
 
@@ -19,14 +22,28 @@ const app = express();
 // Mount routes
 app.use(healthRouter);
 app.use(webhookRouter);
+app.use(dbUsersRouter);
 
 // Mount Bolt's Express app AFTER our routes
 app.use(receiver.app);
 
 // Start
-app.listen(port, '0.0.0.0', () => {
-  console.log(`Aardvark Slack App listening on port ${port}`);
-  console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
-});
+async function start() {
+  try {
+    await initAdminsTable();
+    await seedAdmins();
+    await initSchema();
+    console.log('Database tables ready');
+  } catch (err) {
+    console.error('Failed to initialize database:', err);
+  }
+
+  app.listen(port, '0.0.0.0', () => {
+    console.log(`Aardvark Slack App listening on port ${port}`);
+    console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+  });
+}
+
+start();
 
 export default app;

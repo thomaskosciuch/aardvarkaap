@@ -1,24 +1,75 @@
 import type { WebClient } from '@slack/web-api';
 import type { KnownBlock } from '@slack/types';
 import * as store from '../store';
+import * as dbAdmins from '../db/admins';
 import type { WebhookMessage } from '../store';
+import type { Admin } from '../db/admins';
 
-function buildHomeBlocks(): KnownBlock[] {
+export type HomeTab = 'dashboard' | 'admins';
+
+interface AdminInfo {
+  isAdmin: boolean;
+  isSuperAdmin: boolean;
+  admins: Admin[];
+}
+
+function buildHomeBlocks(tab: HomeTab, adminInfo?: AdminInfo): KnownBlock[] {
+  const blocks: KnownBlock[] = [
+    ...navBar(tab, adminInfo?.isAdmin ?? false),
+  ];
+
+  if (tab === 'admins' && adminInfo?.isAdmin) {
+    blocks.push(...adminsPage(adminInfo.admins, adminInfo.isSuperAdmin));
+  } else {
+    blocks.push(...dashboardPage(adminInfo));
+  }
+
+  return blocks;
+}
+
+// --- Nav bar ---
+
+function navBar(activeTab: HomeTab, isAdmin: boolean): KnownBlock[] {
+  const buttons: object[] = [
+    {
+      type: 'button',
+      text: { type: 'plain_text', text: ':house:  Dashboard', emoji: true },
+      action_id: 'nav_dashboard',
+      ...(activeTab === 'dashboard' ? { style: 'primary' } : {}),
+    },
+  ];
+
+  if (isAdmin) {
+    buttons.push({
+      type: 'button',
+      text: { type: 'plain_text', text: ':lock:  Admins', emoji: true },
+      action_id: 'nav_admins',
+      ...(activeTab === 'admins' ? { style: 'primary' } : {}),
+    });
+  }
+
+  return [
+    { type: 'actions', elements: buttons } as KnownBlock,
+    { type: 'divider' },
+  ];
+}
+
+// --- Dashboard tab ---
+
+function dashboardPage(adminInfo?: AdminInfo): KnownBlock[] {
   const now = new Date();
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const todayMessages = store.messages.filter(m => new Date(m.timestamp) >= todayStart);
 
   const uptimeStr = formatUptime();
 
-  const blocks: KnownBlock[] = [
+  return [
     ...todaySection(uptimeStr, todayMessages),
     { type: 'divider' },
     ...logSection(),
     { type: 'divider' },
-    ...configSection(),
+    ...configSection(adminInfo?.isAdmin ?? false),
   ];
-
-  return blocks;
 }
 
 function formatUptime(): string {
@@ -112,8 +163,8 @@ function logSection(): KnownBlock[] {
   return blocks;
 }
 
-function configSection(): KnownBlock[] {
-  return [
+function configSection(isAdmin: boolean): KnownBlock[] {
+  const blocks: KnownBlock[] = [
     {
       type: 'header',
       text: { type: 'plain_text', text: 'Config' },
@@ -138,24 +189,99 @@ function configSection(): KnownBlock[] {
         { type: 'mrkdwn', text: '`channel` is optional — omit it to log without posting to a channel' },
       ],
     },
-    { type: 'divider' },
-    {
-      type: 'section',
-      text: {
-        type: 'mrkdwn',
-        text: '*Slash commands:*\n`/db-listusers` — list database users\n`/db-adduser <user> <pass>` — create read-only user (admin)\n`/db-removeuser <user>` — drop user (admin)',
-      },
-    },
   ];
+
+  if (isAdmin) {
+    blocks.push(
+      { type: 'divider' },
+      {
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: '*Slash commands:*\n'
+            + '`/db-listusers` — list database users\n'
+            + '`/db-adduser <user> <pass>` — create read-only user (admin)\n'
+            + '`/db-removeuser <user>` — drop user (super-admin)\n'
+            + '`/db-addadmin @user` — add admin (admin)\n'
+            + '`/db-removeadmin @user` — remove admin (admin)',
+        },
+      },
+    );
+  }
+
+  return blocks;
 }
 
-async function publishHome(client: WebClient, userId: string): Promise<void> {
+// --- Admins tab ---
+
+function adminsPage(admins: Admin[], viewerIsSuperAdmin: boolean): KnownBlock[] {
+  const blocks: KnownBlock[] = [
+    {
+      type: 'header',
+      text: { type: 'plain_text', text: 'Admins' },
+    },
+  ];
+
+  if (admins.length === 0) {
+    blocks.push({
+      type: 'section',
+      text: { type: 'mrkdwn', text: '_No admins configured._' },
+    });
+    return blocks;
+  }
+
+  for (const admin of admins) {
+    const role = admin.isSuperAdmin ? ':star: *super-admin*' : 'admin';
+    blocks.push({
+      type: 'section',
+      text: { type: 'mrkdwn', text: `<@${admin.slackUserId}>  —  ${role}` },
+    });
+  }
+
+  blocks.push(
+    { type: 'divider' },
+    {
+      type: 'context',
+      elements: [
+        {
+          type: 'mrkdwn',
+          text: '`/db-addadmin @user` — add admin  |  `/db-removeadmin @user` — remove admin'
+            + (viewerIsSuperAdmin ? '' : '\n_Super-admins cannot be removed by regular admins._'),
+        },
+      ],
+    },
+  );
+
+  return blocks;
+}
+
+// --- Publish ---
+
+async function publishHome(client: WebClient, userId: string, tab: HomeTab = 'dashboard'): Promise<void> {
+  let adminInfo: AdminInfo | undefined;
+
+  try {
+    const userIsAdmin = await dbAdmins.isAdmin(userId);
+    if (userIsAdmin) {
+      const [userIsSuperAdmin, admins] = await Promise.all([
+        dbAdmins.isSuperAdmin(userId),
+        dbAdmins.listAdmins(),
+      ]);
+      adminInfo = { isAdmin: true, isSuperAdmin: userIsSuperAdmin, admins };
+    }
+  } catch (err) {
+    console.error('Error fetching admin info for home view:', err);
+  }
+
+  // Non-admins can't view the admins tab — fall back to dashboard
+  const resolvedTab = adminInfo?.isAdmin ? tab : 'dashboard';
+
   await client.views.publish({
     user_id: userId,
     view: {
       type: 'home',
       callback_id: 'home_view',
-      blocks: buildHomeBlocks(),
+      blocks: buildHomeBlocks(resolvedTab, adminInfo),
     },
   });
 }

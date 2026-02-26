@@ -9,5 +9,16 @@ slackApp.event('app_home_opened', async ({ event, client }) => {
   }
 });
 
+// Nav bar actions
+slackApp.action('nav_dashboard', async ({ ack, body, client }) => {
+  await ack();
+  await publishHome(client, body.user.id, 'dashboard');
+});
+
+slackApp.action('nav_admins', async ({ ack, body, client }) => {
+  await ack();
+  await publishHome(client, body.user.id, 'admins');
+});
+
 // Catch message events so Bolt acks them (prevents 3-second timeout warning)
 slackApp.event('message', async () => {});
