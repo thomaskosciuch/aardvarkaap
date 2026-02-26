@@ -16,8 +16,8 @@ const app = express();
 app.use(require('./routes/health'));
 app.use(require('./routes/webhook'));
 
-// Register Slack event handlers (side-effect import)
 require('./slack/events');
+require('./slack/commands');
 
 // Mount Bolt's Express app AFTER our routes
 app.use(receiver.app);
