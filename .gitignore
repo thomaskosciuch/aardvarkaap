@@ -10,4 +10,4 @@ test-webhook.sh
 # TypeScript build output
 *.js
 *.d.ts
-!aardvark-aap/**/*.js
+aardvark-aap/dist/

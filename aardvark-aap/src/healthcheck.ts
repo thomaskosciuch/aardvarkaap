@@ -1,11 +1,11 @@
-const http = require('http');
+import http from 'http';
 
-const options = {
+const options: http.RequestOptions = {
   hostname: 'localhost',
   port: process.env.PORT || 80,
   path: '/health',
   method: 'GET',
-  timeout: 2000
+  timeout: 2000,
 };
 
 const req = http.request(options, (res) => {
@@ -26,4 +26,3 @@ req.on('timeout', () => {
 });
 
 req.end();
-

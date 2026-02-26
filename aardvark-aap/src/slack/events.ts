@@ -1,5 +1,5 @@
-const { slackApp } = require('../slack');
-const { publishHome } = require('./home');
+import { slackApp } from '../slack';
+import { publishHome } from './home';
 
 slackApp.event('app_home_opened', async ({ event, client }) => {
   try {

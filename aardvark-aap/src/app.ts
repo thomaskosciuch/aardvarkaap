@@ -1,11 +1,14 @@
-const express = require('express');
-const { receiver } = require('./slack');
+import express from 'express';
+import { receiver } from './slack';
+import healthRouter from './routes/health';
+import webhookRouter from './routes/webhook';
+import './slack/events';
 
-const port = process.env.PORT || 80;
+const port = Number(process.env.PORT) || 80;
 
 // Prevent Bolt auth errors from crashing the process
-process.on('unhandledRejection', (err) => {
-  console.error('Unhandled rejection (non-fatal):', err.message || err);
+process.on('unhandledRejection', (err: unknown) => {
+  console.error('Unhandled rejection (non-fatal):', err instanceof Error ? err.message : err);
 });
 
 // Create Express app — our routes run BEFORE Bolt's middleware
@@ -13,11 +16,8 @@ process.on('unhandledRejection', (err) => {
 const app = express();
 
 // Mount routes
-app.use(require('./routes/health'));
-app.use(require('./routes/webhook'));
-
-// Register Slack event handlers (side-effect import)
-require('./slack/events');
+app.use(healthRouter);
+app.use(webhookRouter);
 
 // Mount Bolt's Express app AFTER our routes
 app.use(receiver.app);
@@ -28,4 +28,4 @@ app.listen(port, '0.0.0.0', () => {
   console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
 });
 
-module.exports = app;
+export default app;
