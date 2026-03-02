@@ -5,6 +5,7 @@ import { initSchema } from './db/schema';
 import healthRouter from './routes/health';
 import webhookRouter from './routes/webhook';
 import dbUsersRouter from './routes/db/users';
+import collectorRouter from './routes/collector';
 import './slack/events';
 import './slack/commands';
 
@@ -23,6 +24,7 @@ const app = express();
 app.use(healthRouter);
 app.use(webhookRouter);
 app.use(dbUsersRouter);
+app.use(collectorRouter);
 
 // Mount Bolt's Express app AFTER our routes
 app.use(receiver.app);
