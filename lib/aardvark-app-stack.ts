@@ -3,6 +3,7 @@ import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as ecr from 'aws-cdk-lib/aws-ecr';
 import * as ecs from 'aws-cdk-lib/aws-ecs';
 import * as ecsPatterns from 'aws-cdk-lib/aws-ecs-patterns';
+import * as iam from 'aws-cdk-lib/aws-iam';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as rds from 'aws-cdk-lib/aws-rds';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
@@ -61,6 +62,42 @@ export class AardvarkAppStack extends cdk.Stack {
       'MySQL from ECS'
     );
 
+    // --- Bastion Host for SSH tunnel access to RDS ---
+    const bastionKeyPair = new ec2.KeyPair(this, 'AardvarkBastionKeyPair', {
+      keyPairName: 'aardvark-bastion-key',
+      type: ec2.KeyPairType.RSA,
+    });
+
+    const bastionSecurityGroup = new ec2.SecurityGroup(this, 'AardvarkBastionSecurityGroup', {
+      vpc,
+      description: 'Allow SSH access to bastion host (managed via Slack)',
+      allowAllOutbound: false,
+    });
+
+    // Bastion needs outbound access to RDS on port 3306 for SSH tunneling
+    bastionSecurityGroup.addEgressRule(
+      dbSecurityGroup,
+      ec2.Port.tcp(3306),
+      'MySQL to RDS via SSH tunnel'
+    );
+
+    // Allow MySQL from bastion into the DB security group
+    dbSecurityGroup.addIngressRule(
+      bastionSecurityGroup,
+      ec2.Port.tcp(3306),
+      'MySQL from Bastion'
+    );
+
+    const bastionHost = new ec2.BastionHostLinux(this, 'AardvarkBastionHost', {
+      vpc,
+      instanceType: ec2.InstanceType.of(ec2.InstanceClass.T3, ec2.InstanceSize.MICRO),
+      subnetSelection: { subnetType: ec2.SubnetType.PUBLIC },
+      securityGroup: bastionSecurityGroup,
+      instanceName: 'aardvark-bastion',
+    });
+
+    bastionHost.instance.instance.addPropertyOverride('KeyName', bastionKeyPair.keyPairName);
+
     const database = new rds.DatabaseInstance(this, 'AardvarkDatabase', {
       engine: rds.DatabaseInstanceEngine.mysql({
         version: rds.MysqlEngineVersion.VER_8_0,
@@ -101,6 +138,7 @@ export class AardvarkAppStack extends cdk.Stack {
       }),
       environment: {
         NODE_ENV: 'production',
+        BASTION_SG_ID: bastionSecurityGroup.securityGroupId,
       },
       secrets: {
         SLACK_BOT_TOKEN: ecs.Secret.fromSecretsManager(slackSecret, 'SLACK_BOT_TOKEN'),
@@ -116,6 +154,27 @@ export class AardvarkAppStack extends cdk.Stack {
       hostPort: 0,
       protocol: ecs.Protocol.TCP,
     });
+
+    // Grant ECS task permission to manage bastion security group (for Slack IP whitelisting)
+    taskDefinition.taskRole.addToPrincipalPolicy(new iam.PolicyStatement({
+      actions: [
+        'ec2:AuthorizeSecurityGroupIngress',
+        'ec2:RevokeSecurityGroupIngress',
+        'ec2:DescribeSecurityGroups',
+      ],
+      resources: ['*'],
+      conditions: {
+        StringEquals: {
+          'ec2:ResourceTag/aws:cloudformation:logical-id': 'AardvarkBastionSecurityGroup',
+        },
+      },
+    }));
+
+    // DescribeSecurityGroups needs unrestricted resource scope
+    taskDefinition.taskRole.addToPrincipalPolicy(new iam.PolicyStatement({
+      actions: ['ec2:DescribeSecurityGroups'],
+      resources: ['*'],
+    }));
 
     const loadBalancer = new ecsPatterns.ApplicationLoadBalancedEc2Service(this, 'AardvarkAlbService', {
       cluster,
@@ -158,6 +217,16 @@ export class AardvarkAppStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'AardvarkDatabaseEndpoint', {
       value: database.dbInstanceEndpointAddress,
       description: 'Aardvark App RDS MySQL Endpoint',
+    });
+
+    new cdk.CfnOutput(this, 'AardvarkBastionPublicDns', {
+      value: bastionHost.instancePublicDnsName,
+      description: 'Aardvark Bastion Host Public DNS',
+    });
+
+    new cdk.CfnOutput(this, 'AardvarkBastionKeyPairId', {
+      value: bastionKeyPair.keyPairId,
+      description: 'Aardvark Bastion Key Pair ID (retrieve private key from SSM: /ec2/keypair/{id}/private)',
     });
   }
 }
