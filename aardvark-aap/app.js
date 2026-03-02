@@ -1,5 +1,6 @@
 const express = require('express');
 const { receiver } = require('./slack');
+const db = require('./db');
 
 const port = process.env.PORT || 80;
 
@@ -19,13 +20,26 @@ app.use(require('./routes/webhook'));
 require('./slack/events');
 require('./slack/commands');
 
+// Register Slack slash commands (side-effect import)
+require('./slack/commands');
+
 // Mount Bolt's Express app AFTER our routes
 app.use(receiver.app);
 
-// Start
-app.listen(port, '0.0.0.0', () => {
-  console.log(`Aardvark Slack App listening on port ${port}`);
-  console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
-});
+// Initialize database schema, then start the server
+db.init()
+  .then(() => {
+    app.listen(port, '0.0.0.0', () => {
+      console.log(`Aardvark Slack App listening on port ${port}`);
+      console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+    });
+  })
+  .catch((err) => {
+    console.error('Failed to initialize database:', err.message);
+    // Start the server anyway so health checks pass — DB commands will fail gracefully
+    app.listen(port, '0.0.0.0', () => {
+      console.log(`Aardvark Slack App listening on port ${port} (database unavailable)`);
+    });
+  });
 
 module.exports = app;
