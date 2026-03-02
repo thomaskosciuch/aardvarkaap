@@ -17,8 +17,8 @@ const app = express();
 app.use(require('./routes/health'));
 app.use(require('./routes/webhook'));
 
-// Register Slack event handlers (side-effect import)
 require('./slack/events');
+require('./slack/commands');
 
 // Register Slack slash commands (side-effect import)
 require('./slack/commands');
