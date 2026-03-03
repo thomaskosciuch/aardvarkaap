@@ -115,7 +115,7 @@ function parseSlackUserId(text: string): string | null {
   return null;
 }
 
-// /db-addadmin @user
+// nom  @user
 slackApp.command('/db-addadmin', async ({ ack, body, respond }) => {
   await ack();
 
