@@ -139,6 +139,9 @@ export class AardvarkAppStack extends cdk.Stack {
       environment: {
         NODE_ENV: 'production',
         BASTION_SG_ID: bastionSecurityGroup.securityGroupId,
+        BASTION_HOST_DNS: bastionHost.instancePublicDnsName,
+        BASTION_KEY_PAIR_ID: bastionKeyPair.keyPairId,
+        RDS_ENDPOINT: database.dbInstanceEndpointAddress,
       },
       secrets: {
         SLACK_BOT_TOKEN: ecs.Secret.fromSecretsManager(slackSecret, 'SLACK_BOT_TOKEN'),

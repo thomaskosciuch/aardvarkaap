@@ -6,6 +6,9 @@ import { getPool } from '../db/connection';
 
 const ec2 = new EC2Client({});
 const BASTION_SG_ID = process.env.BASTION_SG_ID;
+const BASTION_HOST_DNS = process.env.BASTION_HOST_DNS;
+const BASTION_KEY_PAIR_ID = process.env.BASTION_KEY_PAIR_ID;
+const RDS_ENDPOINT = process.env.RDS_ENDPOINT;
 
 console.log('Slash commands registered: /db-adduser, /db-listusers, /db-removeuser, /db-addadmin, /db-removeadmin, /db-whitelist-ip, /db-remove-ip, /db-list-ips');
 
@@ -30,8 +33,31 @@ slackApp.command('/db-adduser', async ({ ack, body, respond }) => {
 
   try {
     await dbUsers.createUser(username, password);
+
+    const instructions = [
+      `:white_check_mark: Created user \`${username}\` with *read-only* access.\n`,
+      `*— Connection Instructions —*\n`,
+      `*1. Get the SSH key* (one-time setup):`,
+      '```aws ssm get-parameter \\\n'
+        + `  --name "/ec2/keypair/${BASTION_KEY_PAIR_ID}" \\\n`
+        + '  --with-decryption --query "Parameter.Value" \\\n'
+        + '  --output text > ~/.ssh/aardvark-bastion.pem && \\\n'
+        + '  chmod 600 ~/.ssh/aardvark-bastion.pem```',
+      `\n*2. Whitelist your IP* (run in Slack):`,
+      '`/db-whitelist-ip <your-public-ip>`',
+      `\n*3. Open SSH tunnel* (run in terminal):`,
+      '```ssh -i ~/.ssh/aardvark-bastion.pem -N -L 3306:'
+        + `${RDS_ENDPOINT}:3306 `
+        + `ec2-user@${BASTION_HOST_DNS}` + '```',
+      `\n*4. Connect in DataGrip / any MySQL client:*`,
+      `• Host: \`localhost\``,
+      `• Port: \`3306\``,
+      `• User: \`${username}\``,
+      `• Password: _(as set above)_`,
+    ];
+
     await respond({
-      text: `:white_check_mark: Created user \`${username}\` with *read-only* access.`,
+      text: instructions.join('\n'),
       response_type: 'ephemeral',
     });
   } catch (err: unknown) {
@@ -298,49 +324,49 @@ slackApp.command('/db-list-ips', async ({ ack, respond }) => {
   }
 
   try {
-    const pool = getPool();
-    const [rows] = await pool.execute(
-      'SELECT ip_address, whitelisted_by, whitelisted_at FROM ip_whitelist ORDER BY whitelisted_at DESC',
+    // Security group is the source of truth for what's actually whitelisted
+    const { SecurityGroups } = await ec2.send(new DescribeSecurityGroupsCommand({ GroupIds: [BASTION_SG_ID] }));
+    const sshRules = (SecurityGroups?.[0]?.IpPermissions ?? []).filter(
+      r => r.FromPort === 22 && r.ToPort === 22 && r.IpProtocol === 'tcp',
     );
+    const sgIps = sshRules.flatMap(rule => (rule.IpRanges ?? []).map(range => range.CidrIp ?? ''));
 
-    const entries = rows as Array<{ ip_address: string; whitelisted_by: string; whitelisted_at: Date }>;
-
-    if (entries.length === 0) {
+    if (sgIps.length === 0) {
       await respond({ text: ':information_source: No IPs are currently whitelisted for bastion SSH access.', response_type: 'ephemeral' });
-    } else {
-      const lines = entries.map(row => {
-        const when = new Date(row.whitelisted_at).toLocaleDateString('en-CA');
-        return `\`${row.ip_address}/32\` — whitelisted by *${row.whitelisted_by}* on ${when}`;
-      });
-      await respond({
-        text: `:lock: *Whitelisted IPs for bastion SSH access:*\n${lines.map(l => `• ${l}`).join('\n')}`,
-        response_type: 'ephemeral',
-      });
+      return;
     }
-  } catch (err: unknown) {
-    // Fall back to security group if DB is unavailable
-    console.error('Database query failed, falling back to security group:', err);
-    try {
-      const { SecurityGroups } = await ec2.send(new DescribeSecurityGroupsCommand({ GroupIds: [BASTION_SG_ID] }));
-      const sshRules = (SecurityGroups?.[0]?.IpPermissions ?? []).filter(
-        r => r.FromPort === 22 && r.ToPort === 22 && r.IpProtocol === 'tcp',
-      );
-      const ips = sshRules.flatMap(rule =>
-        (rule.IpRanges ?? []).map(range => {
-          const desc = range.Description ? ` — _${range.Description}_` : '';
-          return `\`${range.CidrIp}\`${desc}`;
-        }),
-      );
 
-      if (ips.length === 0) {
-        await respond({ text: ':information_source: No IPs are currently whitelisted for bastion SSH access.', response_type: 'ephemeral' });
-      } else {
-        await respond({ text: `:lock: *Whitelisted IPs for bastion SSH access:*\n${ips.map(ip => `• ${ip}`).join('\n')}`, response_type: 'ephemeral' });
+    // Enrich with audit data from DB where available
+    let auditMap = new Map<string, { whitelisted_by: string; whitelisted_at: Date }>();
+    try {
+      const pool = getPool();
+      const [rows] = await pool.execute(
+        'SELECT ip_address, whitelisted_by, whitelisted_at FROM ip_whitelist',
+      );
+      for (const row of rows as Array<{ ip_address: string; whitelisted_by: string; whitelisted_at: Date }>) {
+        auditMap.set(row.ip_address, { whitelisted_by: row.whitelisted_by, whitelisted_at: row.whitelisted_at });
       }
-    } catch (sgErr: unknown) {
-      console.error('Error listing IPs:', sgErr);
-      const message = sgErr instanceof Error ? sgErr.message : String(sgErr);
-      await respond({ text: `:x: Failed to list IPs: ${message}`, response_type: 'ephemeral' });
+    } catch (dbErr) {
+      console.error('Failed to fetch audit data from DB, showing SG data only:', dbErr);
     }
+
+    const lines = sgIps.map(cidr => {
+      const ip = cidr.replace('/32', '');
+      const audit = auditMap.get(ip);
+      if (audit) {
+        const when = new Date(audit.whitelisted_at).toLocaleDateString('en-CA');
+        return `\`${cidr}\` — by *${audit.whitelisted_by}* on ${when}`;
+      }
+      return `\`${cidr}\``;
+    });
+
+    await respond({
+      text: `:lock: *Whitelisted IPs for bastion SSH access:*\n${lines.map(l => `• ${l}`).join('\n')}`,
+      response_type: 'ephemeral',
+    });
+  } catch (err: unknown) {
+    console.error('Error listing IPs:', err);
+    const message = err instanceof Error ? err.message : String(err);
+    await respond({ text: `:x: Failed to list IPs: ${message}`, response_type: 'ephemeral' });
   }
 });
