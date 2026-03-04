@@ -4,7 +4,7 @@ import * as dbUsers from '../db/users';
 import * as dbAdmins from '../db/admins';
 import { getPool } from '../db/connection';
 
-const ec2 = new EC2Client({});
+const ec2 = new EC2Client({ region: process.env.AWS_REGION || 'ca-central-1' });
 const BASTION_SG_ID = process.env.BASTION_SG_ID;
 const BASTION_HOST_DNS = process.env.BASTION_HOST_DNS;
 const BASTION_KEY_PAIR_ID = process.env.BASTION_KEY_PAIR_ID;
@@ -12,10 +12,39 @@ const RDS_ENDPOINT = process.env.RDS_ENDPOINT;
 
 console.log('Slash commands registered: /db-adduser, /db-listusers, /db-removeuser, /db-addadmin, /db-removeadmin, /db-whitelist-ip, /db-remove-ip, /db-list-ips');
 
+// --- Connection instructions helper ---
+
+export function buildConnectionInstructions(username: string, password: string): string {
+  return [
+    `:key: *Your database credentials:*`,
+    `• User: \`${username}\``,
+    `• Password: \`${password}\`\n`,
+    `*— Connection Instructions —*\n`,
+    `*1. Get the SSH key* (one-time setup):`,
+    '```aws ssm get-parameter \\\n'
+      + `  --name "/ec2/keypair/${BASTION_KEY_PAIR_ID}" \\\n`
+      + '  --with-decryption --query "Parameter.Value" \\\n'
+      + '  --output text > ~/.ssh/aardvark-bastion.pem && \\\n'
+      + '  chmod 600 ~/.ssh/aardvark-bastion.pem```',
+    `_Don't have the AWS CLI installed? Ask your administrator to send you the key file._`,
+    `\n*2. Whitelist your IP* (run in Slack):`,
+    '`/db-whitelist-ip <your-public-ip>`',
+    `\n*3. Open SSH tunnel* (run in terminal):`,
+    '```ssh -i ~/.ssh/aardvark-bastion.pem -N -L 3306:'
+      + `${RDS_ENDPOINT}:3306 `
+      + `ec2-user@${BASTION_HOST_DNS}` + '```',
+    `\n*4. Connect in DataGrip / any MySQL client:*`,
+    `• Host: \`localhost\``,
+    `• Port: \`3306\``,
+    `• User: \`${username}\``,
+    `• Password: \`${password}\``,
+  ].join('\n');
+}
+
 // --- Database user commands ---
 
 // /db-adduser <username> <password>
-slackApp.command('/db-adduser', async ({ ack, body, respond }) => {
+slackApp.command('/db-adduser', async ({ ack, body, respond, client }) => {
   await ack();
 
   if (!(await dbAdmins.isAdmin(body.user_id))) {
@@ -34,31 +63,36 @@ slackApp.command('/db-adduser', async ({ ack, body, respond }) => {
   try {
     await dbUsers.createUser(username, password);
 
-    const instructions = [
-      `:white_check_mark: Created user \`${username}\` with *read-only* access.\n`,
-      `*— Connection Instructions —*\n`,
-      `*1. Get the SSH key* (one-time setup):`,
-      '```aws ssm get-parameter \\\n'
-        + `  --name "/ec2/keypair/${BASTION_KEY_PAIR_ID}" \\\n`
-        + '  --with-decryption --query "Parameter.Value" \\\n'
-        + '  --output text > ~/.ssh/aardvark-bastion.pem && \\\n'
-        + '  chmod 600 ~/.ssh/aardvark-bastion.pem```',
-      `\n*2. Whitelist your IP* (run in Slack):`,
-      '`/db-whitelist-ip <your-public-ip>`',
-      `\n*3. Open SSH tunnel* (run in terminal):`,
-      '```ssh -i ~/.ssh/aardvark-bastion.pem -N -L 3306:'
-        + `${RDS_ENDPOINT}:3306 `
-        + `ec2-user@${BASTION_HOST_DNS}` + '```',
-      `\n*4. Connect in DataGrip / any MySQL client:*`,
-      `• Host: \`localhost\``,
-      `• Port: \`3306\``,
-      `• User: \`${username}\``,
-      `• Password: _(as set above)_`,
-    ];
-
-    await respond({
-      text: instructions.join('\n'),
-      response_type: 'ephemeral',
+    // Open modal to pick who should receive the connection instructions
+    await client.views.open({
+      trigger_id: body.trigger_id,
+      view: {
+        type: 'modal' as const,
+        callback_id: 'send_db_instructions_modal',
+        private_metadata: JSON.stringify({ username, password }),
+        title: { type: 'plain_text' as const, text: 'Send DB Instructions' },
+        submit: { type: 'plain_text' as const, text: 'Send' },
+        close: { type: 'plain_text' as const, text: 'Cancel' },
+        blocks: [
+          {
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: `:white_check_mark: Created user \`${username}\` with *read-only* access.\n\nWho should receive the connection instructions?`,
+            },
+          },
+          {
+            type: 'input',
+            block_id: 'recipient_block',
+            label: { type: 'plain_text' as const, text: 'Send instructions to' },
+            element: {
+              type: 'users_select',
+              action_id: 'recipient_user',
+              placeholder: { type: 'plain_text' as const, text: 'Select a user' },
+            },
+          },
+        ],
+      },
     });
   } catch (err: unknown) {
     console.error('db-adduser error:', err);
@@ -67,6 +101,29 @@ slackApp.command('/db-adduser', async ({ ack, body, respond }) => {
       text: `:x: Failed to create user: ${message}`,
       response_type: 'ephemeral',
     });
+  }
+});
+
+// Handle "Send DB Instructions" modal submission
+slackApp.view('send_db_instructions_modal', async ({ ack, view, client }) => {
+  await ack();
+
+  const { username, password } = JSON.parse(view.private_metadata);
+  const recipientUserId = view.state.values.recipient_block?.recipient_user?.selected_user;
+
+  if (!recipientUserId) {
+    console.error('No recipient selected in send_db_instructions_modal');
+    return;
+  }
+
+  try {
+    const instructions = buildConnectionInstructions(username, password);
+    await client.chat.postMessage({
+      channel: recipientUserId,
+      text: instructions,
+    });
+  } catch (err) {
+    console.error('Error sending DB instructions DM:', err);
   }
 });
 
