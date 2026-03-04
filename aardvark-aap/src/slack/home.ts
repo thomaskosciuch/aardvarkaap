@@ -226,7 +226,10 @@ function configSection(isAdmin: boolean): KnownBlock[] {
             + '`/db-adduser <user> <pass>` — create read-only user (admin)\n'
             + '`/db-removeuser <user>` — drop user (super-admin)\n'
             + '`/db-addadmin @user` — add admin (admin)\n'
-            + '`/db-removeadmin @user` — remove admin (admin)',
+            + '`/db-removeadmin @user` — remove admin (admin)\n'
+            + '`/db-whitelist-ip <ip>` — whitelist IP for bastion SSH\n'
+            + '`/db-remove-ip <ip>` — remove IP from whitelist\n'
+            + '`/db-list-ips` — show whitelisted IPs',
         },
       },
     );
@@ -371,7 +374,7 @@ function processesPage(info?: ProcessesInfo): KnownBlock[] {
         type: 'mrkdwn',
         text: '*Step 2 — Add heartbeat calls to your script*\n'
           + 'At the start and end of your cron job, send a POST request to the collector endpoint:\n'
-          + '```POST /collector/run\nContent-Type: application/json\n\n'
+          + '```POST http://Aardva-Aardv-RxgkhBCzdLSX-559408849.ca-central-1.elb.amazonaws.com/collector/run\nContent-Type: application/json\n\n'
           + '{\n'
           + '  "job_name": "my-etl-job",\n'
           + '  "status": "started"\n'
@@ -383,7 +386,7 @@ function processesPage(info?: ProcessesInfo): KnownBlock[] {
       text: {
         type: 'mrkdwn',
         text: 'When the job finishes, report success or failure:\n'
-          + '```POST /collector/run\n\n'
+          + '```POST http://Aardva-Aardv-RxgkhBCzdLSX-559408849.ca-central-1.elb.amazonaws.com/collector/run\n\n'
           + '{\n'
           + '  "job_name": "my-etl-job",\n'
           + '  "status": "success",\n'
@@ -393,43 +396,11 @@ function processesPage(info?: ProcessesInfo): KnownBlock[] {
       },
     },
     {
-      type: 'section',
-      text: {
-        type: 'mrkdwn',
-        text: '*Step 3 — Example: wrapping a bash cron job*\n'
-          + '```#!/bin/bash\n'
-          + 'AARDVARK="https://<your-alb>/collector/run"\n'
-          + 'JOB="my-etl-job"\n'
-          + 'START=$(date +%s)\n\n'
-          + '# Signal start\n'
-          + 'curl -s -X POST "$AARDVARK" \\\n'
-          + '  -H "Content-Type: application/json" \\\n'
-          + '  -d "{\\"job_name\\":\\"$JOB\\",\\"status\\":\\"started\\"}"\n\n'
-          + '# Run your actual job\n'
-          + '/opt/scripts/run-etl.sh\n'
-          + 'EXIT_CODE=$?\n\n'
-          + 'DURATION=$(( $(date +%s) - START ))\n\n'
-          + 'if [ $EXIT_CODE -eq 0 ]; then\n'
-          + '  STATUS="success"\n'
-          + '  MSG="ETL completed"\n'
-          + 'else\n'
-          + '  STATUS="failed"\n'
-          + '  MSG="Exit code $EXIT_CODE"\n'
-          + 'fi\n\n'
-          + '# Signal result\n'
-          + 'curl -s -X POST "$AARDVARK" \\\n'
-          + '  -H "Content-Type: application/json" \\\n'
-          + '  -d "{\\"job_name\\":\\"$JOB\\",\\"status\\":\\"$STATUS\\",\\"duration_s\\":$DURATION,\\"message\\":\\"$MSG\\"}"\n'
-          + '```',
-      },
-    },
-    {
       type: 'context',
       elements: [
         {
           type: 'mrkdwn',
-          text: ':bulb: *Tip:* Replace `<your-alb>` with your Aardvark ALB hostname. '
-            + 'Valid statuses are `started`, `success`, and `failed`. '
+          text: ':bulb: *Tip:* Valid statuses are `started`, `success`, and `failed`. '
             + 'The `duration_s` and `message` fields are optional.',
         },
       ],
@@ -439,8 +410,8 @@ function processesPage(info?: ProcessesInfo): KnownBlock[] {
       text: {
         type: 'mrkdwn',
         text: '*Collector API reference:*\n'
-          + '• `POST /collector/run` — log a run (started / success / failed)\n'
-          + '• `GET /collector/status/:job_name` — get the latest run for a job',
+          + '• `POST http://Aardva-Aardv-RxgkhBCzdLSX-559408849.ca-central-1.elb.amazonaws.com/collector/run` — log a run (started / success / failed)\n'
+          + '• `GET http://Aardva-Aardv-RxgkhBCzdLSX-559408849.ca-central-1.elb.amazonaws.com/collector/status/:job_name` — get the latest run for a job',
       },
     },
   );

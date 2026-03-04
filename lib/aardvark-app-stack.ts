@@ -160,17 +160,10 @@ export class AardvarkAppStack extends cdk.Stack {
       actions: [
         'ec2:AuthorizeSecurityGroupIngress',
         'ec2:RevokeSecurityGroupIngress',
-        'ec2:DescribeSecurityGroups',
       ],
-      resources: ['*'],
-      conditions: {
-        StringEquals: {
-          'ec2:ResourceTag/aws:cloudformation:logical-id': 'AardvarkBastionSecurityGroup',
-        },
-      },
+      resources: [`arn:aws:ec2:*:*:security-group/${bastionSecurityGroup.securityGroupId}`],
     }));
 
-    // DescribeSecurityGroups needs unrestricted resource scope
     taskDefinition.taskRole.addToPrincipalPolicy(new iam.PolicyStatement({
       actions: ['ec2:DescribeSecurityGroups'],
       resources: ['*'],
