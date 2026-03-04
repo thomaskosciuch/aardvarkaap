@@ -333,15 +333,41 @@ function processesPage(info?: ProcessesInfo): KnownBlock[] {
       const severityBadge = job.severity === 'high' ? ':red_circle:' : job.severity === 'medium' ? ':large_orange_circle:' : ':white_circle:';
       const scheduleText = job.schedule ? `\`${job.schedule}\`` : `every ${formatSeconds(job.expectedEveryS)}`;
 
-      blocks.push({
-        type: 'section',
-        text: {
-          type: 'mrkdwn',
-          text: `${statusEmoji} *${job.jobName}*  ${severityBadge}\n`
-            + (job.description ? `${job.description}\n` : '')
-            + `:clock1: ${scheduleText}  |  ${lastRunText}`,
-        },
-      });
+      blocks.push(
+        {
+          type: 'section',
+          text: {
+            type: 'mrkdwn',
+            text: `${statusEmoji} *${job.jobName}*  ${severityBadge}\n`
+              + (job.description ? `${job.description}\n` : '')
+              + `:clock1: ${scheduleText}  |  ${lastRunText}`,
+          },
+        } as KnownBlock,
+        {
+          type: 'actions',
+          elements: [
+            {
+              type: 'button',
+              text: { type: 'plain_text', text: ':pencil2:  Edit', emoji: true },
+              action_id: 'edit_process',
+              value: job.jobName,
+            },
+            {
+              type: 'button',
+              text: { type: 'plain_text', text: ':wastebasket:  Delete', emoji: true },
+              action_id: 'delete_process',
+              value: job.jobName,
+              style: 'danger',
+              confirm: {
+                title: { type: 'plain_text', text: 'Delete process?' },
+                text: { type: 'mrkdwn', text: `Are you sure you want to delete *${job.jobName}*? This cannot be undone.` },
+                confirm: { type: 'plain_text', text: 'Delete' },
+                deny: { type: 'plain_text', text: 'Cancel' },
+              },
+            },
+          ],
+        } as KnownBlock,
+      );
     }
   }
 
@@ -524,6 +550,97 @@ export function buildAddProcessModal(): View {
       },
     ] as KnownBlock[],
   } as View;
+}
+
+// --- Edit Process modal ---
+
+export function buildEditProcessModal(job: Job): View {
+  return {
+    type: 'modal',
+    callback_id: 'edit_process_modal',
+    private_metadata: job.jobName,
+    title: { type: 'plain_text', text: 'Edit Process' },
+    submit: { type: 'plain_text', text: 'Save' },
+    close: { type: 'plain_text', text: 'Cancel' },
+    blocks: [
+      {
+        type: 'section',
+        text: { type: 'mrkdwn', text: `*Process:* \`${job.jobName}\`` },
+      },
+      {
+        type: 'input',
+        block_id: 'description_block',
+        label: { type: 'plain_text', text: 'Description' },
+        optional: true,
+        element: {
+          type: 'plain_text_input',
+          action_id: 'description',
+          placeholder: { type: 'plain_text', text: 'What does this process do?' },
+          ...(job.description ? { initial_value: job.description } : {}),
+        },
+      },
+      {
+        type: 'input',
+        block_id: 'schedule_block',
+        label: { type: 'plain_text', text: 'Schedule (cron expression)' },
+        optional: true,
+        element: {
+          type: 'plain_text_input',
+          action_id: 'schedule',
+          placeholder: { type: 'plain_text', text: 'e.g. 0 2 * * *  (daily at 2am)' },
+          ...(job.schedule ? { initial_value: job.schedule } : {}),
+        },
+        hint: { type: 'plain_text', text: 'For display and missed-job detection. Aardvark does not trigger the job.' },
+      },
+      {
+        type: 'input',
+        block_id: 'expected_every_block',
+        label: { type: 'plain_text', text: 'Expected every (seconds)' },
+        element: {
+          type: 'plain_text_input',
+          action_id: 'expected_every_s',
+          initial_value: String(job.expectedEveryS),
+        },
+        hint: { type: 'plain_text', text: 'If no heartbeat arrives within this window, the job is flagged as missed.' },
+      },
+      {
+        type: 'input',
+        block_id: 'max_runtime_block',
+        label: { type: 'plain_text', text: 'Max runtime (seconds)' },
+        optional: true,
+        element: {
+          type: 'plain_text_input',
+          action_id: 'max_runtime_s',
+          placeholder: { type: 'plain_text', text: 'e.g. 600 for 10 minutes' },
+          ...(job.maxRuntimeS != null ? { initial_value: String(job.maxRuntimeS) } : {}),
+        },
+        hint: { type: 'plain_text', text: 'If a "started" run exceeds this, the job is flagged as stuck.' },
+      },
+      {
+        type: 'input',
+        block_id: 'severity_block',
+        label: { type: 'plain_text', text: 'Severity' },
+        element: {
+          type: 'static_select',
+          action_id: 'severity',
+          initial_option: severityOption(job.severity),
+          options: [
+            { text: { type: 'plain_text', text: ':white_circle: Low' },             value: 'low' },
+            { text: { type: 'plain_text', text: ':large_orange_circle: Medium' },    value: 'medium' },
+            { text: { type: 'plain_text', text: ':red_circle: High' },               value: 'high' },
+          ],
+        },
+      },
+    ] as KnownBlock[],
+  } as View;
+}
+
+function severityOption(severity: string): { text: { type: 'plain_text'; text: string }; value: string } {
+  switch (severity) {
+    case 'low':    return { text: { type: 'plain_text', text: ':white_circle: Low' },             value: 'low' };
+    case 'high':   return { text: { type: 'plain_text', text: ':red_circle: High' },               value: 'high' };
+    default:       return { text: { type: 'plain_text', text: ':large_orange_circle: Medium' },    value: 'medium' };
+  }
 }
 
 // --- Publish ---

@@ -1,4 +1,5 @@
 import { getPool } from './connection';
+import { CronExpressionParser } from 'cron-parser';
 import type { RowDataPacket, ResultSetHeader } from 'mysql2';
 
 export type JobStatus = 'started' | 'success' | 'failed' | 'missed';
@@ -108,14 +109,17 @@ export async function getLatestRunPerJob(): Promise<CronRun[]> {
 
 /**
  * Find active jobs that haven't reported a 'started' or 'success' row
- * within their expected_every_s window. Returns job names that are overdue.
+ * within their expected_every_s window. Schedule-aware: if a job has a cron
+ * expression, it checks whether the job was actually expected to run recently
+ * (e.g. M-F jobs won't be flagged on weekends).
  */
 export async function findMissedJobs(): Promise<string[]> {
   const pool = getPool();
   const conn = await pool.getConnection();
   try {
+    // Get all active jobs that have no recent heartbeat
     const [rows] = await conn.query<RowDataPacket[]>(`
-      SELECT jr.job_name
+      SELECT jr.job_name, jr.schedule, jr.expected_every_s
       FROM aardvark_job_registry jr
       WHERE jr.active = 1
         AND NOT EXISTS (
@@ -125,7 +129,36 @@ export async function findMissedJobs(): Promise<string[]> {
             AND cr.created_at >= DATE_SUB(NOW(), INTERVAL jr.expected_every_s SECOND)
         )
     `);
-    return rows.map(r => r.job_name);
+
+    // Filter out jobs that weren't expected to run in this window
+    const missed: string[] = [];
+    const now = new Date();
+
+    for (const row of rows) {
+      if (!row.schedule) {
+        // No cron expression — use expected_every_s only (original behavior)
+        missed.push(row.job_name);
+        continue;
+      }
+
+      try {
+        // Check if the cron schedule had an occurrence within the expected_every_s window
+        const windowStart = new Date(now.getTime() - row.expected_every_s * 1000);
+        const interval = CronExpressionParser.parse(row.schedule, { currentDate: now });
+        const prevRun = interval.prev().toDate();
+
+        // If the most recent scheduled occurrence falls within the window, the job is missed
+        if (prevRun >= windowStart) {
+          missed.push(row.job_name);
+        }
+        // Otherwise (e.g., weekend for a M-F job), skip — not actually overdue
+      } catch {
+        // Invalid cron expression — fall back to flagging as missed
+        missed.push(row.job_name);
+      }
+    }
+
+    return missed;
   } finally {
     conn.release();
   }
