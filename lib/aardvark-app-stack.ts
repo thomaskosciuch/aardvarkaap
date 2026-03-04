@@ -200,6 +200,12 @@ export class AardvarkAppStack extends cdk.Stack {
       description: 'Aardvark App Load Balancer URL',
     });
 
+    new cdk.CfnOutput(this, 'AardvarkAlbDns', {
+      value: loadBalancer.loadBalancer.loadBalancerDnsName,
+      description: 'Aardvark ALB DNS name (for cross-stack imports)',
+      exportName: 'AardvarkAlbDns',
+    });
+
     new cdk.CfnOutput(this, 'AardvarkVpcId', {
       value: vpc.vpcId,
       description: 'Aardvark App VPC ID',
