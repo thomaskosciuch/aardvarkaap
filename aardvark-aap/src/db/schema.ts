@@ -70,6 +70,37 @@ export async function initSchema(): Promise<void> {
         INDEX idx_activity_created    (created_at)
       )
     `);
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS ip_whitelist (
+        id              INT          NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        ip_address      VARCHAR(45)  NOT NULL,
+        whitelisted_by  VARCHAR(255) NOT NULL,
+        slack_user_id   VARCHAR(64)  NOT NULL,
+        whitelisted_at  DATETIME     DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY unique_ip (ip_address)
+      )
+    `);
+
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS ip_whitelist_history (
+        id              INT          NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        ip_address      VARCHAR(45)  NOT NULL,
+        whitelisted_by  VARCHAR(255) NOT NULL,
+        slack_user_id   VARCHAR(64)  NOT NULL,
+        whitelisted_at  DATETIME,
+        removed_at      DATETIME     DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // Archive removed IPs automatically via trigger
+    await conn.query(`DROP TRIGGER IF EXISTS trg_ip_whitelist_archive`);
+    await conn.query(`
+      CREATE TRIGGER trg_ip_whitelist_archive
+      BEFORE DELETE ON ip_whitelist
+      FOR EACH ROW
+      INSERT INTO ip_whitelist_history (ip_address, whitelisted_by, slack_user_id, whitelisted_at)
+      VALUES (OLD.ip_address, OLD.whitelisted_by, OLD.slack_user_id, OLD.whitelisted_at)
+    `);
   } finally {
     conn.release();
   }
